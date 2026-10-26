@@ -331,6 +331,8 @@ const toggleSeat = (seat) => {
     movieId: selectedMovie.id,
     movieTitle: selectedMovie.title || selectedMovie.name,
     poster: selectedMovie.poster_path,
+        theatre: THEATRES.find((t) => t.id === theatreId)?.name || "IMovies Screen",
+    paymentMethod: paymentMethod,
     date: bookingDate,
     time: showtimes,
     seats: [...selectedSeats].sort(),
