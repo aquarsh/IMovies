@@ -142,7 +142,7 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem("imovies-watchlist") || "[]"); } catch { return []; }
   });
   useEffect(() => {
-  fetch("https://imovies-gb5o.onrender.com/api/bookings")
+  fetch("/api/bookings")
     .then(response => {
       if (!response.ok) throw new Error("Failed to load bookings");
       return response.json();
@@ -158,7 +158,7 @@ const clearBookings = async () => {
   }
 
   try {
-    const response = await fetch("https://imovies-gb5o.onrender.com/api/bookings", {
+    const response = await fetch("/api/bookings", {
       method: "DELETE"
     });
 
@@ -212,7 +212,7 @@ useEffect(() => {
   const loadBookings = async () => {
     try {
       const response = await fetch(
-        "https://imovies-gb5o.onrender.com/api/bookings"
+        "/api/bookings"
       );
 
       if (!response.ok) {
@@ -341,7 +341,7 @@ const toggleSeat = (seat) => {
   };
 
   try {
-    const response = await fetch("https://imovies-gb5o.onrender.com/api/bookings", {
+    const response = await fetch("/api/bookings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(booking)
@@ -352,7 +352,7 @@ const toggleSeat = (seat) => {
 if (!response.ok) {
   if (response.status === 409) {
     const latestResponse = await fetch(
-      "https://imovies-gb5o.onrender.com/api/bookings"
+      "/api/bookings"
     );
 
     if (latestResponse.ok) {
