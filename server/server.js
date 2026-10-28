@@ -6,6 +6,7 @@ const dotenv = require("dotenv");
 const path = require("path");
 const http = require("http");
 const { Server } = require("socket.io");
+  const { router: authRouter } = require("./auth");
 
 dotenv.config({ path: path.join(__dirname, ".env") });
 
@@ -14,6 +15,7 @@ const server = http.createServer(app);
 
 app.use(cors());
 app.use(express.json());
+  app.use("/api/auth", authRouter);
 
 const io = new Server(server, {
   cors: {
