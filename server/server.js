@@ -1,10 +1,10 @@
-
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const path = require("path");
 const http = require("http");
+const jwt = require("jsonwebtoken");
 const { Server } = require("socket.io");
   const { router: authRouter } = require("./auth");
 
@@ -23,6 +23,28 @@ const io = new Server(server, {
     methods: ["GET", "POST"]
   }
 });
+
+// Reads the login token if there is one. Never blocks the request:
+// logged-in users get req.userId, guests simply have no req.userId.
+function optionalAuth(req, res, next) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ")
+    ? header.slice(7)
+    : null;
+
+  if (token && process.env.JWT_SECRET) {
+    try {
+      req.userId = jwt.verify(
+        token,
+        process.env.JWT_SECRET
+      ).id;
+    } catch (error) {
+      // invalid or expired token: treat as a guest
+    }
+  }
+
+  next();
+}
 
 app.get("/", (req, res) => {
   res.json({
@@ -83,7 +105,13 @@ const bookingSchema = new mongoose.Schema({
   },
   total: Number,
   paymentMethod: String,
-  createdAt: String
+  createdAt: String,
+  // Who made this booking (empty for old bookings made before login)
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null
+  }
 });
 
 const Booking =
@@ -131,6 +159,8 @@ function showFilter({
 }
 
 // Get seats already booked for a particular show
+// (public on purpose: everyone must see which seats are taken,
+// but only seat numbers are returned, never who booked them)
 app.get("/api/booked-seats", async (req, res) => {
   try {
     const {
@@ -179,10 +209,17 @@ app.get("/api/booked-seats", async (req, res) => {
   }
 });
 
-// Get all bookings
-app.get("/api/bookings", async (req, res) => {
+// Get the logged-in user's own bookings only
+app.get("/api/bookings", optionalAuth, async (req, res) => {
   try {
-    const bookings = await Booking.find().sort({
+    // Guests have no bookings of their own
+    if (!req.userId) {
+      return res.json([]);
+    }
+
+    const bookings = await Booking.find({
+      user: req.userId
+    }).sort({
       _id: -1
     });
 
@@ -195,7 +232,7 @@ app.get("/api/bookings", async (req, res) => {
 });
 
 // Save a booking and prevent duplicate seats
-app.post("/api/bookings", async (req, res) => {
+app.post("/api/bookings", optionalAuth, async (req, res) => {
   try {
     const {
       bookingId,
@@ -267,7 +304,9 @@ app.post("/api/bookings", async (req, res) => {
 
     const booking = await Booking.create({
       ...req.body,
-      movieId: String(movieId || "")
+      movieId: String(movieId || ""),
+      // always taken from the login token, never from the request body
+      user: req.userId || null
     });
 
     // Tell connected clients to refresh seat availability
@@ -296,15 +335,21 @@ app.post("/api/bookings", async (req, res) => {
   }
 });
 
-// Clear all bookings (development/testing only)
-app.delete("/api/bookings", async (req, res) => {
+// Clear the logged-in user's own bookings (never other users')
+app.delete("/api/bookings", optionalAuth, async (req, res) => {
   try {
-    await Booking.deleteMany({});
+    if (!req.userId) {
+      return res.status(401).json({
+        message: "Please log in to clear your bookings."
+      });
+    }
+
+    await Booking.deleteMany({ user: req.userId });
 
     io.emit("seats-updated", { cleared: true });
 
     res.json({
-      message: "All bookings cleared"
+      message: "Your bookings were cleared"
     });
   } catch (error) {
     res.status(500).json({
@@ -320,6 +365,12 @@ async function startServer() {
     if (!process.env.MONGODB_URI) {
       throw new Error(
         "MONGODB_URI is missing from server/.env"
+      );
+    }
+
+    if (!process.env.JWT_SECRET) {
+      console.warn(
+        "Warning: JWT_SECRET is missing, login will not work"
       );
     }
 
