@@ -4,6 +4,15 @@ import "./App.css";
 // IMovies: React + Vite + TMDB movie discovery .
 // Keep your existing TMDB key here, OR add VITE_TMDB_API_KEY to client/.env.
 const API_KEY = import.meta.env.VITE_TMDB_API_KEY || "PASTE_YOUR_EXISTING_TMDB_API_KEY_HERE";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "https://imovies-gb50.onrender.com").replace(/\/$/, "");
+const getAuthToken = () => localStorage.getItem("imovies-token") || "";
+const apiFetch = (path, options = {}) => {
+  const headers = { ...(options.headers || {}) };
+  const token = getAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  return fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+};
 const API_ROOT = "https://api.themoviedb.org/3";
 const IMAGE_ROOT = "https://image.tmdb.org/t/p";
 const POSTER_SIZE = "w500";
@@ -121,6 +130,15 @@ export default function App() {
   const [homeMovies, setHomeMovies] = useState([]);
   const [heroMovie, setHeroMovie] = useState(null);
   const [page, setPage] = useState("home");
+  const [authUser, setAuthUser] = useState(() => { try { return localStorage.getItem("imovies-token") ? JSON.parse(localStorage.getItem("imovies-user") || "null") : null; } catch { return null; } });
+  const [authOpen, setAuthOpen] = useState(() => !localStorage.getItem("imovies-token"));
+  const [authMode, setAuthMode] = useState("login");
+  const [authName, setAuthName] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [bookedSeats, setBookedSeats] = useState([]);
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [query, setQuery] = useState("");
   const [genre, setGenre] = useState("all");
@@ -141,15 +159,7 @@ export default function App() {
   const [savedIds, setSavedIds] = useState(() => {
     try { return JSON.parse(localStorage.getItem("imovies-watchlist") || "[]"); } catch { return []; }
   });
-  useEffect(() => {
-  fetch("/api/bookings")
-    .then(response => {
-      if (!response.ok) throw new Error("Failed to load bookings");
-      return response.json();
-    })
-    .then(data => setBookings(data))
-    .catch(error => console.error("Loading bookings:", error));
-}, []);
+
   const [toast, setToast] = useState("");
   
 const clearBookings = async () => {
@@ -158,9 +168,8 @@ const clearBookings = async () => {
   }
 
   try {
-    const response = await fetch("/api/bookings", {
-      method: "DELETE"
-    });
+    if (!authUser) { setAuthOpen(true); setToast("Please log in to manage your bookings."); return; }
+    const response = await apiFetch("/api/bookings", { method: "DELETE" });
 
     if (!response.ok) {
       throw new Error("Could not clear bookings.");
@@ -205,41 +214,84 @@ const clearBookings = async () => {
   useEffect(() => { loadMovies(); }, [loadMovies]);
   useEffect(() => { localStorage.setItem("imovies-bookings", JSON.stringify(bookings)); }, [bookings]);
   useEffect(() => { localStorage.setItem("imovies-watchlist", JSON.stringify(savedIds)); }, [savedIds]);
-  // Load bookings from MongoDB and refresh every 3 seconds
-useEffect(() => {
-  let cancelled = false;
+  // Load only this user's bookings; refresh periodically while signed in.
+  useEffect(() => {
+    let cancelled = false;
+    const loadBookings = async () => {
+      if (!authUser) { setBookings([]); return; }
+      try {
+        const response = await apiFetch("/api/bookings");
+        if (!response.ok) throw new Error("Failed to load bookings");
+        const data = await response.json();
+        if (!cancelled && Array.isArray(data)) setBookings(data);
+      } catch (error) {
+        if (!cancelled) console.error("Loading bookings:", error);
+      }
+    };
+    loadBookings();
+    const interval = window.setInterval(loadBookings, 3000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [authUser]);
 
-  const loadBookings = async () => {
+  const submitAuth = async (event) => {
+    event.preventDefault();
+    setAuthError("");
+    setAuthBusy(true);
     try {
-      const response = await fetch(
-        "/api/bookings"
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to load bookings");
-      }
-
-      const data = await response.json();
-
-      if (!cancelled && Array.isArray(data)) {
-        setBookings(data);
-      }
+      const payload = authMode === "register"
+        ? { name: authName.trim(), email: authEmail.trim(), password: authPassword }
+        : { email: authEmail.trim(), password: authPassword };
+      const response = await fetch(`${API_BASE_URL}/api/auth/${authMode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Could not sign in. Please try again.");
+      if (!data.token || !data.user) throw new Error("The server did not return a login token.");
+      localStorage.setItem("imovies-token", data.token);
+      localStorage.setItem("imovies-user", JSON.stringify(data.user));
+      setAuthUser(data.user);
+      setAuthOpen(false);
+      setAuthPassword("");
+      setToast(authMode === "register" ? "Account created. Welcome to IMovies!" : "Welcome back!");
     } catch (error) {
-      if (!cancelled) {
-        console.error("Loading bookings:", error);
-      }
+      setAuthError(error.message || "Unable to connect to the login service.");
+    } finally {
+      setAuthBusy(false);
     }
   };
 
-  loadBookings();
-
-  const interval = window.setInterval(loadBookings, 3000);
-
-  return () => {
-    cancelled = true;
-    window.clearInterval(interval);
+  const logout = () => {
+    localStorage.removeItem("imovies-token");
+    localStorage.removeItem("imovies-user");
+    setAuthUser(null);
+    setBookings([]);
+    setAuthMode("login");
+    setAuthOpen(true);
+    setToast("You have been logged out.");
   };
-}, []);
+
+  // Seat availability is shared across all visitors and devices.
+  useEffect(() => {
+    let cancelled = false;
+    const loadBookedSeats = async () => {
+      if (!selectedMovie || !bookingDate || !showtimes || !theatreId) { setBookedSeats([]); return; }
+      const theatre = THEATRES.find((item) => item.id === theatreId)?.name || "";
+      const params = new URLSearchParams({ movieId: String(selectedMovie.id), movieTitle: selectedMovie.title || selectedMovie.name || "", date: bookingDate, time: showtimes, theatre });
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/booked-seats?${params.toString()}`);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || "Could not refresh seat availability.");
+        if (!cancelled) setBookedSeats(Array.isArray(data.bookedSeats) ? data.bookedSeats : []);
+      } catch (error) {
+        if (!cancelled) console.error("Loading booked seats:", error);
+      }
+    };
+    loadBookedSeats();
+    const interval = window.setInterval(loadBookedSeats, 3000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [selectedMovie, bookingDate, showtimes, theatreId]);
   useEffect(() => {
     if (!toast) return undefined;
     const timer = window.setTimeout(() => setToast(""), 2800);
@@ -289,15 +341,7 @@ useEffect(() => {
 
   const goHome = () => { setPage("home"); setSelectedMovie(null); setQuery(""); setGenre("all"); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const goMovies = () => { setPage("movies"); setSelectedMovie(null); window.scrollTo({ top: 0, behavior: "smooth" }); };
-  const isSeatBooked = (seat) =>
-  bookings.some(
-    (booking) =>
-      String(booking.movieId) === String(selectedMovie?.id) &&
-      booking.date === bookingDate &&
-      booking.time === showtimes &&
-      Array.isArray(booking.seats) &&
-      booking.seats.includes(seat)
-  );
+  const isSeatBooked = (seat) => bookedSeats.includes(seat);
 
 const toggleSeat = (seat) => {
   if (isSeatBooked(seat)) {
@@ -321,6 +365,7 @@ const toggleSeat = (seat) => {
   );
 };
   const confirmBooking = async () => {
+  if (!authUser) { setAuthMode("login"); setAuthOpen(true); setToast("Please log in before reserving seats."); return; }
   if (!selectedMovie || selectedSeats.length === 0) {
     setToast("Choose at least one seat to continue.");
     return;
@@ -341,9 +386,8 @@ const toggleSeat = (seat) => {
   };
 
   try {
-    const response = await fetch("/api/bookings", {
+    const response = await apiFetch("/api/bookings", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(booking)
     });
 
@@ -351,9 +395,7 @@ const toggleSeat = (seat) => {
 
 if (!response.ok) {
   if (response.status === 409) {
-    const latestResponse = await fetch(
-      "/api/bookings"
-    );
+    const latestResponse = await apiFetch("/api/bookings");
 
     if (latestResponse.ok) {
       const latestBookings = await latestResponse.json();
@@ -405,9 +447,9 @@ if (!response.ok) {
         <nav className="main-nav" aria-label="Main navigation">
           <button className={page === "home" ? "nav-link active" : "nav-link"} onClick={goHome} type="button">Home</button>
           <button className={page === "movies" ? "nav-link active" : "nav-link"} onClick={goMovies} type="button">Browse films</button>
-          <button className="button button-quiet" onClick={() => { setPage("bookings"); window.scrollTo({ top: 0, behavior: "smooth" }); }} type="button">My bookings <span className="nav-count">{bookings.length}</span></button>
+          <button className="button button-quiet" onClick={() => { if (!authUser) { setAuthMode("login"); setAuthOpen(true); return; } setPage("bookings"); window.scrollTo({ top: 0, behavior: "smooth" }); }} type="button">My bookings <span className="nav-count">{bookings.length}</span></button>
         </nav>
-        <button className="header-cta" onClick={goMovies} type="button">Find a film <Icon name="arrow" size={15} /></button>
+        <div className="header-account">{authUser ? <><span className="account-greeting">Hi, {authUser.name || authUser.email}</span><button className="header-cta account-button" onClick={logout} type="button">Log out</button></> : <button className="header-cta account-button" onClick={() => { setAuthMode("login"); setAuthOpen(true); }} type="button">Log in / Sign up</button>}</div>
       </header>
 
       {page === "home" && <main>
@@ -460,7 +502,7 @@ if (!response.ok) {
               <div className="theatre-meta"><span><Icon name="calendar" size={14} /> {THEATRES.find((t) => t.id === theatreId)?.format}</span><span>Selected screening location</span></div>
             </div>
             <div className="booking-controls"><label className="date-control"><span><Icon name="calendar" size={16} /> Screening date</span><input type="date" min={new Date().toISOString().slice(0, 10)} value={bookingDate} onChange={(e) => { setBookingDate(e.target.value); setSelectedSeats([]); }} /></label><div className="time-control"><span>Showtime</span><div className="time-list">{SHOWTIMES.map((time) => <button type="button" key={time} className={showtimes === time ? "time-pill chosen" : "time-pill"} onClick={() => { setShowtimes(time); setSelectedSeats([]); }}>{time}</button>)}</div></div></div>
-            <div className="seat-layout"><div className="screen-wrap"><div className="screen-glow" /><div className="screen-shape" /><span>SCREEN THIS WAY</span></div><div className="seat-grid">{SEAT_ROWS.map((row) => <div className="seat-row" key={row}><span className="row-label">{row}</span>{Array.from({ length: SEATS_PER_ROW }, (_, i) => { const seat = `${row}${i + 1}`; const booked = isSeatBooked(seat); const selected = selectedSeats.includes(seat); return <button type="button" key={seat} disabled={booked} aria-label={`Seat ${seat}${booked ? " booked" : selected ? " selected" : " available"}`} title={booked ? "Already booked in this browser" : `Seat ${seat}`} onClick={() => toggleSeat(seat)} className={`seat ${booked ? "occupied" : selected ? "selected" : "available"}`}>{i + 1}</button>; })}<span className="row-label">{row}</span></div>)}</div><div className="seat-legend"><span><i className="legend-seat available-legend" /> Available</span><span><i className="legend-seat selected-legend" /> Selected</span><span><i className="legend-seat occupied-legend" /> Booked</span></div><div className="booking-summary"><div><span>Selected seats</span><b>{selectedSeats.length ? [...selectedSeats].sort().join(", ") : "None yet"}</b></div><div><span>Total</span><strong>{money(selectedSeats.length * 220)}</strong></div><div className="booking-total-action"><button className="button button-primary" onClick={() => { setPaymentReady(true); document.getElementById("payment-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} type="button" disabled={!selectedSeats.length}>Continue to payment <Icon name="arrow" size={16} /></button></div></div></div>
+            <div className="seat-layout"><div className="screen-wrap"><div className="screen-glow" /><div className="screen-shape" /><span>SCREEN THIS WAY</span></div><div className="seat-grid">{SEAT_ROWS.map((row) => <div className="seat-row" key={row}><span className="row-label">{row}</span>{Array.from({ length: SEATS_PER_ROW }, (_, i) => { const seat = `${row}${i + 1}`; const booked = isSeatBooked(seat); const selected = selectedSeats.includes(seat); return <button type="button" key={seat} disabled={booked} aria-label={`Seat ${seat}${booked ? " booked" : selected ? " selected" : " available"}`} title={booked ? "Already booked for this screening" : `Seat ${seat}`} onClick={() => toggleSeat(seat)} className={`seat ${booked ? "occupied" : selected ? "selected" : "available"}`}>{i + 1}</button>; })}<span className="row-label">{row}</span></div>)}</div><div className="seat-legend"><span><i className="legend-seat available-legend" /> Available</span><span><i className="legend-seat selected-legend" /> Selected</span><span><i className="legend-seat occupied-legend" /> Booked</span></div><div className="booking-summary"><div><span>Selected seats</span><b>{selectedSeats.length ? [...selectedSeats].sort().join(", ") : "None yet"}</b></div><div><span>Total</span><strong>{money(selectedSeats.length * 220)}</strong></div><div className="booking-total-action"><button className="button button-primary" onClick={() => { setPaymentReady(true); document.getElementById("payment-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} type="button" disabled={!selectedSeats.length}>Continue to payment <Icon name="arrow" size={16} /></button></div></div></div>
               <section className="payment-panel" id="payment-panel">
                 <div className="payment-heading"><div><p className="eyebrow">02 · SECURE CHECKOUT PREVIEW</p><h3>Choose how to <em>pay.</em></h3><p>Pick a payment method to preview the  checkout.</p></div><div className="payment-total"><small>AMOUNT DUE</small><strong>{money(selectedSeats.length * 220)}</strong></div></div>
                 <div className="payment-options">{PAYMENT_METHODS.map((method) => <button type="button" key={method.id} className={paymentMethod === method.id ? "payment-option selected" : "payment-option"} onClick={() => setPaymentMethod(method.id)}><span className="payment-radio">{paymentMethod === method.id ? "✓" : ""}</span><span><b>{method.name}</b><small>{method.detail}</small></span></button>)}</div>
@@ -476,6 +518,22 @@ if (!response.ok) {
 
       {page === "bookings" && (<main className="shell page-main bookings-page"><div className="page-heading"><p className="eyebrow">YOUR LITTLE TICKET STUBS</p><h1>My <em>bookings.</em></h1><p>All your reservations, gathered in one place.</p><button className="button button-quiet" onClick={clearBookings} type="button">Clear bookings</button></div>{bookings.length ? (<div className="booking-list">{[...bookings].reverse().map((booking) => (<article className="booking-card" key={booking.bookingId}><div className="booking-thumb">{booking.poster ? (<img src={posterUrl(booking.poster)} alt="" />) : (<span>✦</span>)}</div><div className="booking-card-info"><p className="eyebrow">CONFIRMED · {booking.bookingId}</p><h2>{booking.movieTitle}</h2><p>{booking.date} · {booking.time}</p><p><b>Theatre:</b> {booking.theatre || "IMovies Screen"}</p><p>Seats: {booking.seats.join(", ")}</p><p>Payment: {booking.paymentMethod || "Checkout"}</p></div><div className="booking-card-total"><span>Total</span><b>{money(booking.total)}</b></div></article>))}</div>) : (<div className="empty-state"><span>♧</span><h2>Your ticket wallet is waiting.</h2><p>Choose a film, pick your seats, and your bookings will appear here.</p><button className="button button-primary" onClick={goMovies} type="button">Find a film <Icon name="arrow" size={16} /></button></div>)}<div className="watchlist-block"><div className="section-heading"><div><p className="eyebrow">SAVED FOR LATER</p><h2>Your <em>watchlist.</em></h2></div><button className="text-link" onClick={goMovies} type="button">Find more films <Icon name="arrow" size={15} /></button></div>{popularMovies.filter((movie) => savedIds.includes(movie.id)).length > 0 ? (<div className="movie-grid">{popularMovies.filter((movie) => savedIds.includes(movie.id)).map((movie, index) => (<MovieCard key={movie.id} movie={movie} onOpen={openMovie} index={index} />))}</div>) : (<p className="section-subtitle">Add a film to your watchlist to see it here.</p>)}</div></main>)}
       <footer className="site-footer shell"><button className="brand footer-brand" onClick={goHome} type="button"><span className="brand-mark">✦</span> IMovies<span className="brand-period">.</span></button><p>Made for movie nights and a little bit of magic.</p><span className="footer-credit">Movie data by TMDB ·  booking experience</span></footer>
+      {authOpen && <div className="auth-backdrop" role="presentation"><section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        {authUser && <button className="auth-close" type="button" aria-label="Close login" onClick={() => setAuthOpen(false)}><Icon name="close" size={18} /></button>}
+        <span className="brand-mark">✦</span>
+        <p className="eyebrow">WELCOME TO IMOVIES</p>
+        <h2 id="auth-title">{authMode === "register" ? "Create your account." : "Your next movie night awaits."}</h2>
+        <p className="auth-intro">{authMode === "register" ? "Create an account to save your bookings and reserve seats." : "Log in to manage your bookings and reserve your seats."}</p>
+        <form className="auth-form" onSubmit={submitAuth}>
+          {authMode === "register" && <label>Full name<input autoComplete="name" value={authName} onChange={(event) => setAuthName(event.target.value)} placeholder="Your name" required maxLength={80} /></label>}
+          <label>Email address<input type="email" autoComplete="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="you@example.com" required /></label>
+          <label>Password<input type="password" autoComplete={authMode === "register" ? "new-password" : "current-password"} value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder={authMode === "register" ? "At least 6 characters" : "Your password"} minLength={6} required /></label>
+          {authError && <p className="auth-error" role="alert">{authError}</p>}
+          <button className="button button-primary auth-submit" type="submit" disabled={authBusy}>{authBusy ? "Please wait…" : authMode === "register" ? "Create account" : "Log in"} <Icon name="arrow" size={16} /></button>
+        </form>
+        <p className="auth-switch">{authMode === "register" ? "Already have an account?" : "New to IMovies?"} <button type="button" onClick={() => { setAuthMode(authMode === "register" ? "login" : "register"); setAuthError(""); }}>{authMode === "register" ? "Log in" : "Create an account"}</button></p>
+        <p className="auth-security-note">Your password is securely hashed by the server. Never share it with anyone.</p>
+      </section></div>}
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}
     </div>
   );
