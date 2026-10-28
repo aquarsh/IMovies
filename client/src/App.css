@@ -152,3 +152,179 @@ body{background:#10131f}
 .banner-film-chip {
   top: 13px !important;
 }
+
+/* Account access additions: isolated styles to preserve the existing IMovies design. */
+.header-account {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.account-greeting {
+  color: var(--muted, #b8bdd8);
+  font-size: 0.84rem;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-button {
+  white-space: nowrap;
+}
+.auth-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(4, 6, 24, 0.78);
+  backdrop-filter: blur(12px);
+}
+.auth-modal {
+  position: relative;
+  width: min(100%, 460px);
+  max-height: min(92vh, 760px);
+  overflow-y: auto;
+  padding: clamp(24px, 5vw, 38px);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 24px;
+  color: #f7f7ff;
+  background: linear-gradient(145deg, #171b3d 0%, #10132d 70%, #17102e 100%);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
+}
+.auth-close {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 50%;
+  color: inherit;
+  background: rgba(255,255,255,.06);
+  cursor: pointer;
+}
+.auth-modal h2 {
+  margin: 12px 34px 8px 0;
+  font-size: clamp(1.8rem, 5vw, 2.35rem);
+  line-height: 1.12;
+  letter-spacing: -0.04em;
+}
+.auth-intro {
+  margin: 0 0 24px;
+  color: #b9bfdc;
+  line-height: 1.6;
+  font-size: .94rem;
+}
+.auth-form {
+  display: grid;
+  gap: 15px;
+}
+.auth-form label {
+  display: grid;
+  gap: 8px;
+  color: #e4e7fb;
+  font-size: .86rem;
+  font-weight: 600;
+}
+.auth-form input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1px solid rgba(210, 216, 255, .2);
+  border-radius: 12px;
+  outline: none;
+  color: #fff;
+  background: rgba(4, 7, 28, .55);
+  font: inherit;
+}
+.auth-form input:focus {
+  border-color: #a89aff;
+  box-shadow: 0 0 0 3px rgba(168, 154, 255, .15);
+}
+.auth-form input::placeholder {
+  color: #8188ad;
+}
+.auth-submit {
+  width: 100%;
+  justify-content: center;
+  margin-top: 4px;
+}
+.auth-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 119, 139, .35);
+  border-radius: 10px;
+  color: #ffb6c0;
+  background: rgba(255, 80, 110, .09);
+  font-size: .87rem;
+  line-height: 1.45;
+}
+.auth-switch {
+  margin: 20px 0 0;
+  color: #c6c9e0;
+  text-align: center;
+  font-size: .9rem;
+}
+.auth-switch button {
+  padding: 0;
+  border: 0;
+  color: #c4b8ff;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.auth-security-note {
+  margin: 16px 0 0;
+  color: #858caf;
+  font-size: .76rem;
+  line-height: 1.5;
+  text-align: center;
+}
+@media (max-width: 760px) {
+  .header-account {
+    gap: 6px;
+  }
+  .account-greeting {
+    display: none;
+  }
+  .header-account .header-cta {
+    padding-inline: 12px;
+  }
+}
+@media (max-width: 440px) {
+  .auth-backdrop {
+    padding: 12px;
+  }
+  .auth-modal {
+    border-radius: 18px;
+  }
+}
+
+/* Fix IMovies login modal positioning */
+.auth-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 99999 !important;
+  display: grid !important;
+  place-items: center !important;
+  box-sizing: border-box !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: 20px !important;
+  background: rgba(4, 6, 24, 0.82) !important;
+}
+
+.auth-modal {
+  position: relative !important;
+  display: block !important;
+  width: min(100%, 460px) !important;
+  max-height: 90vh !important;
+  overflow-y: auto !important;
+  box-sizing: border-box !important;
+}
